@@ -7,6 +7,10 @@ if(!secret||!publicKey)throw Error('시험 프로젝트 키가 필요합니다.'
 const serviceHeaders={apikey:secret,...(secret.startsWith('sb_secret_')?{}:{authorization:`Bearer ${secret}`})};
 const password=randomBytes(24).toString('base64url');
 const runId=randomUUID().slice(0,8);
+// The database and auth calls are real; only OpenAI responses are simulated.
+process.env.OPENAI_API_KEY='test-simulated-openai';process.env.OPENAI_MODEL='test-simulated-model';
+const realFetch=globalThis.fetch;let failOnce=true;let aiCalls=0;
+globalThis.fetch=async(url,options)=>{if(new URL(url).hostname==='api.openai.com'){aiCalls++;if(failOnce){failOnce=false;return new Response(null,{status:503});}return new Response(JSON.stringify({output:[{content:[{type:'output_text',text:'가상 AI 응답: 근거를 살펴봅시다.'}]}]}),{status:200,headers:{'content-type':'application/json'}});}return realFetch(url,options);};
 const {server}=await import('../server.mjs');
 await new Promise((resolve,reject)=>server.once('error',reject).listen(0,'127.0.0.1',resolve));
 const appUrl=`http://127.0.0.1:${server.address().port}`;
@@ -38,7 +42,10 @@ try{
   const session=(await userPost('ld_sessions',student.token,{assignment_id:assignment.id,student_id:student.id,character:'지민'}));assert.equal(session.status,201);const sid=session.body[0].id;
   for(let turn=1;turn<=10;turn++){
     assert.equal((await userPost('ld_messages',student.token,{session_id:sid,turn_index:turn,role:'student',content:`가상 학생 질문 ${turn}`})).status,201);
-    await admin('ld_messages',{session_id:sid,turn_index:turn,role:'assistant',content:'가상 AI 응답: 근거를 살펴봅시다.'});
+    const ask=()=>fetch(`${appUrl}/api/chat`,{method:'POST',headers:{authorization:`Bearer ${student.token}`,'content-type':'application/json'},body:JSON.stringify({sessionId:sid,turnIndex:turn})});
+    if(turn===1){const failed=await ask();assert.equal(failed.status,502);assert.equal((await userRead(`ld_messages?session_id=eq.${sid}&turn_index=eq.1`,student.token)).length,1);}
+    const answer=await ask();assert.equal(answer.status,200);assert.match((await answer.json()).reply,/가상 AI 응답/);
+    if(turn===1){const repeated=await ask();assert.equal(repeated.status,200);assert.equal(aiCalls,2);}
   }
   for(let version=1;version<=3;version++)assert.equal((await userPost('ld_summary_draft_versions',student.token,{session_id:sid,version,content:`시험 초안 ${version}`})).status,201);
   assert.equal((await userPost('ld_summary_draft_versions',student.token,{session_id:sid,version:4,content:'초과 초안'})).status>=400,true);
@@ -61,7 +68,7 @@ try{
   const feedback2=await userPost('ld_feedback',teacher.token,{submission_id:second.id,author_id:teacher.id,teacher_text:'가상 2차 피드백',published_at:new Date().toISOString()});assert.equal(feedback2.status,201);
   assert.equal((await userRead(`ld_feedback?submission_id=in.(${first.id},${second.id})`,student.token)).length,2);
   assert.equal((await userRead(`ld_feedback?submission_id=in.(${first.id},${second.id})`,otherStudent.token)).length,0);
-  console.log('성공: 가상 계정 4개, 10차례, 초안 3개, 앱 서버 경유 1·2차 제출, 교사 피드백, 미공개 초안 및 타인 접근 차단');
+  console.log('성공: 앱 대화 10차례, 응답 장애 후 재시도·중복 방지, 초안 3개, 앱 경유 1·2차 제출, 피드백과 접근 차단');
   console.log('시험 데이터는 별도 시험 프로젝트에 남아 있으며 실제 AI와 음성 기능은 시험하지 않았습니다.');
-}catch(error){console.error(`시험 중단: ${error.message}`);console.error('이미 생성된 가상 데이터는 시험 프로젝트에 남아 있을 수 있습니다.');process.exitCode=1;}finally{await new Promise(resolve=>server.close(resolve));}
+}catch(error){console.error(`시험 중단: ${error.message}`);console.error('이미 생성된 가상 데이터는 시험 프로젝트에 남아 있을 수 있습니다.');process.exitCode=1;}finally{globalThis.fetch=realFetch;await new Promise(resolve=>server.close(resolve));}
 
