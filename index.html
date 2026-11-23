@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>관내분실 | 문학 탐구</title><style>
+:root{font-family:system-ui,sans-serif;color:#18283d;background:#f4f7fb;line-height:1.75}*{box-sizing:border-box}body{margin:0}header{background:#182945;color:white;padding:22px max(6vw,24px);font-weight:700}main{max-width:1050px;margin:auto;padding:45px 24px 80px}.crumb{color:#506789;font-size:.9rem}.hero{background:#213c60;color:#fff;border-radius:24px;padding:38px;margin:20px 0 38px}.hero h1{font-size:clamp(2.3rem,6vw,4rem);margin:0;line-height:1.25}.tags span{display:inline-block;margin:16px 8px 0 0;padding:5px 14px;border-radius:30px;background:#ffffff20}.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}.card,.panel{background:white;border:1px solid #dfe7f0;border-radius:18px;padding:24px}.emoji{font-size:2rem}.card h3{margin:6px 0}h2{margin:40px 0 14px}.panel p{margin:8px 0}.muted{color:#5c6f86}.question{background:#e6f0fd;border-radius:18px;padding:25px;border-left:5px solid #3c73bd}.source a{color:#315c98}footer{color:#66788d;font-size:.9rem;margin-top:45px}@media(max-width:700px){.grid{grid-template-columns:1fr}.hero{padding:27px}}
+.placeholder-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:12px}.placeholder{min-height:120px;background:#fff;border:1px dashed #bac9d9;border-radius:16px;padding:18px;color:#718399}.connection{font-size:.85rem;color:#586e88;margin-top:12px}@media(max-width:700px){.placeholder-grid{grid-template-columns:repeat(2,1fr)}}</style></head><body><header>📖 문학 탐구 교실</header><main><div class="crumb">작품 둘러보기　/　현대소설　/　2010년대 이후</div><section class="hero"><div>기억을 따라가는 SF 단편</div><h1 id="work-title">관내분실</h1><div class="tags"><span id="work-author">김초엽</span><span>SF · 단편소설</span><span>2018년 수상작품집 출간</span></div></section><h2>세 가지 열쇠로 작품 읽기</h2><section class="grid"><article class="card"><div class="emoji">👩‍👧</div><h3>인물과 관계</h3><p>지민은 어머니 은하의 흔적을 찾아가며 자신이 알지 못했던 어머니의 삶을 새롭게 마주합니다.</p></article><article class="card"><div class="emoji">📚</div><h3>도서관과 마인드</h3><p>고인의 마인드를 보관하는 미래의 도서관은 기억의 보존과 누락을 함께 생각하게 하는 공간입니다.</p></article><article class="card"><div class="emoji">💭</div><h3>기억과 정체성</h3><p>기술로 남긴 기록과 타인의 기억이 한 사람의 삶을 얼마나 담아낼 수 있는지 탐구합니다.</p></article></section><h2>작품 속으로</h2><section class="panel"><p>고인의 마인드를 보관하는 미래 사회에서 지민은 어머니 김은하의 마인드가 도서관에서 분실되었다는 사실을 알게 됩니다. 어머니의 기록을 찾아가던 지민은 생전에 충분히 알지 못했던 한 사람의 삶을 발견합니다.</p><p class="muted">인물·사건·배경의 관계와 모녀 사이의 이해, 기억과 기록의 의미를 연결해 살펴보세요. 이는 작품을 읽는 하나의 관점입니다.</p></section><h2>만약 그랬다면?</h2><div class="question">지민이 어머니의 마인드를 찾지 못했다면, 어머니를 이해하는 방식은 어떻게 달라졌을까요? 작품의 상황을 근거로 여러 가능성을 생각해 보세요.</div><h2>유사 작품 5편</h2><section class="placeholder-grid" aria-label="유사 작품 자리"><div class="placeholder">작품 1</div><div class="placeholder">작품 2</div><div class="placeholder">작품 3</div><div class="placeholder">작품 4</div><div class="placeholder">작품 5</div></section><h2>작가의 다른 작품</h2><section class="placeholder-grid" aria-label="작가의 다른 작품 자리"><div class="placeholder">작품</div><div class="placeholder">작품</div><div class="placeholder">작품</div></section><p id="connection-status" class="connection" role="status">작품 정보 연결 확인 중…</p><footer class="source">2017년 제2회 한국과학문학상 중단편 부문 수상, 2018년 수상작품집 출간. <a href="https://library.kaist.ac.kr/search/ctlgSearch/posesn/view.do?bibctrlno=823078&amp;ty=B">KAIST 도서관 서지 정보</a><br>화면 시안 · 작품 원문이나 대사는 포함하지 않았습니다.</footer></main><script>
+(async () => {
+ const status = document.getElementById('connection-status');
+ const url = 'https://kygvdfvzpwpchhwczifo.supabase.co/rest/v1/literary_works?select=title,author&id=eq.1';
+ const key = 'sb_publishable_C_Y33EifT7DUPTpDpoJfmQ_fwJ1PXm6';
+ try {
+  const response = await fetch(url, {headers: {apikey: key, Authorization: `Bearer ${key}`}});
+  if (!response.ok) throw new Error('HTTP ' + response.status);
+  const data = await response.json();
+  if (!data.length) throw new Error('조회 결과 없음');
+  document.getElementById('work-title').textContent = data[0].title;
+  document.getElementById('work-author').textContent = data[0].author;
+  status.textContent = 'Supabase 작품 정보 연결됨';
+ } catch (error) {
+  status.textContent = '작품 정보를 불러오지 못해 시안의 기본 내용을 표시합니다. 연결 설정과 접근 권한을 확인해 주세요.';
+ }
+})();
+</script></body></html>
