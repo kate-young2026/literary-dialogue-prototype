@@ -160,6 +160,13 @@ begin
         where session_id=new.session_id and turn_index=new.turn_index and role='student') then
       raise exception 'Assistant reply requires a student message' using errcode='23514';
     end if;
+  elsif tg_table_name='ld_summary_draft_versions' then
+    if exists(select 1 from ld_submissions where session_id=new.session_id) then
+      raise exception 'Cannot save a first draft after submission' using errcode='23514';
+    end if;
+    if new.version<>(select coalesce(max(version),0)+1 from ld_summary_draft_versions where session_id=new.session_id) then
+      raise exception 'Draft versions must be sequential' using errcode='23514';
+    end if;
   elsif tg_table_name='ld_submissions' then
     if (select count(*) from ld_messages s join ld_messages a
         on a.session_id=s.session_id and a.turn_index=s.turn_index and a.role='assistant'
@@ -184,6 +191,8 @@ $$;
 create trigger ld_guard_messages before insert on public.ld_messages
   for each row execute function public.ld_guard_session_insert();
 create trigger ld_guard_submissions before insert on public.ld_submissions
+  for each row execute function public.ld_guard_session_insert();
+create trigger ld_guard_summary_drafts before insert on public.ld_summary_draft_versions
   for each row execute function public.ld_guard_session_insert();
 
 -- Non-recursive membership checks execute as the function owner.

@@ -11,15 +11,17 @@ do $$
 declare missing text;
 begin
   select string_agg(name, ', ') into missing
-  from unnest(array['ld_sessions','ld_turn_exceptions','ld_messages','ld_recordings','ld_reports',
-                    'ld_submissions','ld_feedback','ld_teacher_feedback_drafts','ld_ai_drafts']) name
+  from unnest(array['ld_student_details','ld_voice_consent','ld_sessions','ld_turn_exceptions','ld_messages','ld_recordings','ld_reports',
+                    'ld_submissions','ld_summary_draft_versions','ld_feedback','ld_teacher_feedback_drafts','ld_ai_drafts']) name
   where not exists (select 1 from pg_class c join pg_namespace n on n.oid=c.relnamespace
     where n.nspname='public' and c.relname=name and c.relrowsecurity);
   if missing is not null then raise exception 'Missing tables or RLS: %', missing; end if;
   if not exists(select 1 from pg_trigger where tgrelid='public.ld_messages'::regclass
       and tgname='ld_guard_messages' and not tgisinternal)
      or not exists(select 1 from pg_trigger where tgrelid='public.ld_submissions'::regclass
-      and tgname='ld_guard_submissions' and not tgisinternal) then
+      and tgname='ld_guard_submissions' and not tgisinternal)
+     or not exists(select 1 from pg_trigger where tgrelid='public.ld_summary_draft_versions'::regclass
+      and tgname='ld_guard_summary_drafts' and not tgisinternal) then
     raise exception 'Session guard triggers are missing';
   end if;
   if has_table_privilege('authenticated','public.ld_submissions','INSERT')

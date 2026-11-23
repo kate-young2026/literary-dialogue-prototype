@@ -63,6 +63,7 @@ test('PostgreSQL 호환 DB에서 스키마와 학급별 RLS를 검증한다',asy
     await assert.rejects(db.exec(`insert into public.ld_submissions(session_id,version,content,character_count) values ('${ids.d2}',2,'수정',2)`));
     await db.exec(`insert into public.ld_feedback(submission_id,author_id,teacher_text,published_at) values ('cccccccc-cccc-4ccc-8ccc-cccccccccccc','${ids.t2}','피드백',now());
       insert into public.ld_submissions(session_id,version,content,character_count) values ('${ids.d2}',2,'수정',2);`);
+    await assert.rejects(db.exec(`insert into public.ld_summary_draft_versions(session_id,version,content) values ('${ids.d2}',1,'늦은 초안')`));
     const second=(await db.query(`select id from public.ld_submissions where session_id='${ids.d2}' and version=2`)).rows[0].id;
     await assert.rejects(db.exec(`insert into public.ld_feedback(submission_id,author_id,teacher_text,published_at,score,score_max) values ('${second}','${ids.t2}','피드백',now(),21,20)`));
     await assert.rejects(db.exec(`insert into public.ld_feedback(submission_id,author_id,teacher_text,published_at,score) values ('${second}','${ids.t2}','피드백',now(),10)`));
