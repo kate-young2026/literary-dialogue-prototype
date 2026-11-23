@@ -7,6 +7,9 @@ if(!secret||!publicKey)throw Error('시험 프로젝트 키가 필요합니다.'
 const serviceHeaders={apikey:secret,...(secret.startsWith('sb_secret_')?{}:{authorization:`Bearer ${secret}`})};
 const password=randomBytes(24).toString('base64url');
 const runId=randomUUID().slice(0,8);
+const {server}=await import('../server.mjs');
+await new Promise((resolve,reject)=>server.once('error',reject).listen(0,'127.0.0.1',resolve));
+const appUrl=`http://127.0.0.1:${server.address().port}`;
 async function call(path,{method='GET',data,token,service=false,prefer}={}){
   const headers={...(service?serviceHeaders:{apikey:publicKey,...(token?{authorization:`Bearer ${token}`}:{})}),'content-type':'application/json',...(prefer?{prefer}:{})};
   const response=await fetch(base.origin+path,{method,headers,...(data===undefined?{}:{body:JSON.stringify(data)}),signal:AbortSignal.timeout(15000)});
@@ -44,14 +47,21 @@ try{
   assert.equal((await userRead(`ld_messages?session_id=eq.${sid}`,teacher.token)).length,20);
   assert.equal((await userRead(`ld_summary_draft_versions?session_id=eq.${sid}`,teacher.token)).length,3);
   assert.equal((await userPost('ld_submissions',student.token,{session_id:sid,version:1,content:'직접 제출 우회',character_count:8})).status>=400,true);
-  const first=(await admin('ld_submissions',{session_id:sid,version:1,content:'가상 1차 요약',character_count:8}))[0];
+  const firstResponse=await fetch(`${appUrl}/api/submission`,{method:'POST',headers:{authorization:`Bearer ${student.token}`,'content-type':'application/json'},body:JSON.stringify({sessionId:sid,version:1,content:'가상 1차 요약'})});assert.equal(firstResponse.status,201);
+  const first=(await userRead(`ld_submissions?session_id=eq.${sid}&version=eq.1`,student.token))[0];
+  await admin('ld_ai_drafts',{submission_id:first.id,content:'비공개 가상 AI 평가 초안'});
+  assert.equal((await userPost('ld_teacher_feedback_drafts',teacher.token,{submission_id:first.id,author_id:teacher.id,content:'비공개 교사 초안'})).status,201);
+  assert.equal((await userRead(`ld_ai_drafts?submission_id=eq.${first.id}`,teacher.token)).length,1);
+  assert.equal((await userRead(`ld_ai_drafts?submission_id=eq.${first.id}`,student.token)).length,0);
+  assert.equal((await userRead(`ld_teacher_feedback_drafts?submission_id=eq.${first.id}`,student.token)).length,0);
   const early=await call('/rest/v1/ld_submissions',{method:'POST',service:true,data:{session_id:sid,version:2,content:'이른 수정',character_count:5}});assert.equal(early.status>=400,true);
   const feedback=await userPost('ld_feedback',teacher.token,{submission_id:first.id,author_id:teacher.id,teacher_text:'가상 1차 피드백',published_at:new Date().toISOString()});assert.equal(feedback.status,201);
-  const second=(await admin('ld_submissions',{session_id:sid,version:2,content:'가상 수정 요약',character_count:8}))[0];
+  const secondResponse=await fetch(`${appUrl}/api/submission`,{method:'POST',headers:{authorization:`Bearer ${student.token}`,'content-type':'application/json'},body:JSON.stringify({sessionId:sid,version:2,content:'가상 수정 요약'})});assert.equal(secondResponse.status,201);
+  const second=(await userRead(`ld_submissions?session_id=eq.${sid}&version=eq.2`,student.token))[0];
   const feedback2=await userPost('ld_feedback',teacher.token,{submission_id:second.id,author_id:teacher.id,teacher_text:'가상 2차 피드백',published_at:new Date().toISOString()});assert.equal(feedback2.status,201);
   assert.equal((await userRead(`ld_feedback?submission_id=in.(${first.id},${second.id})`,student.token)).length,2);
   assert.equal((await userRead(`ld_feedback?submission_id=in.(${first.id},${second.id})`,otherStudent.token)).length,0);
-  console.log('성공: 가상 계정 4개, 학급·과제, 10차례, 초안 3개, 1·2차 제출과 교사 피드백, 다른 사용자 접근 차단');
+  console.log('성공: 가상 계정 4개, 10차례, 초안 3개, 앱 서버 경유 1·2차 제출, 교사 피드백, 미공개 초안 및 타인 접근 차단');
   console.log('시험 데이터는 별도 시험 프로젝트에 남아 있으며 실제 AI와 음성 기능은 시험하지 않았습니다.');
-}catch(error){console.error(`시험 중단: ${error.message}`);console.error('이미 생성된 가상 데이터는 시험 프로젝트에 남아 있을 수 있습니다.');process.exitCode=1;}
+}catch(error){console.error(`시험 중단: ${error.message}`);console.error('이미 생성된 가상 데이터는 시험 프로젝트에 남아 있을 수 있습니다.');process.exitCode=1;}finally{await new Promise(resolve=>server.close(resolve));}
 
