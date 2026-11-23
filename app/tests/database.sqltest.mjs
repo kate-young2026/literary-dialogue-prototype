@@ -1,0 +1,92 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {readFile} from 'node:fs/promises';
+import {PGlite} from '@electric-sql/pglite';
+
+test('PostgreSQL 호환 DB에서 스키마와 학급별 RLS를 검증한다',async()=>{
+  const db=new PGlite();
+  const ids={t1:'11111111-1111-4111-8111-111111111111',t2:'22222222-2222-4222-8222-222222222222',s1:'33333333-3333-4333-8333-333333333333',s2:'44444444-4444-4444-8444-444444444444',c1:'55555555-5555-4555-8555-555555555555',c2:'66666666-6666-4666-8666-666666666666',a1:'77777777-7777-4777-8777-777777777777',a2:'88888888-8888-4888-8888-888888888888',d1:'99999999-9999-4999-8999-999999999999',d2:'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',sub:'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'};
+  try{
+    await db.exec(`create role anon; create role authenticated; create schema auth; create schema storage;
+      grant usage on schema auth to authenticated;
+      create table auth.users(id uuid primary key);
+      create function auth.uid() returns uuid language sql stable as $$select nullif(current_setting('request.jwt.claim.sub',true),'')::uuid$$;
+      create table storage.objects(id uuid primary key default gen_random_uuid(),bucket_id text,name text);
+      create table storage.buckets(id text primary key,name text,public boolean,file_size_limit integer,allowed_mime_types text[]);
+      create function storage.foldername(p text) returns text[] language sql immutable as $$select (string_to_array(p,'/'))[1:array_length(string_to_array(p,'/'),1)-1]$$;
+      create function storage.filename(p text) returns text language sql immutable as $$select (string_to_array(p,'/'))[array_length(string_to_array(p,'/'),1)]$$;
+      grant usage on schema storage to authenticated; grant select,insert on storage.objects to authenticated;
+      alter table storage.objects enable row level security;
+      create table public.literary_works(id bigint primary key);`);
+    await db.exec(await readFile(new URL('../db/schema.sql',import.meta.url),'utf8'));
+    await db.exec(await readFile(new URL('../db/voice-storage.sql',import.meta.url),'utf8'));
+    await db.exec(`insert into auth.users(id) values ('${ids.t1}'),('${ids.t2}'),('${ids.s1}'),('${ids.s2}');
+      insert into public.ld_profiles(id,display_name,role) values ('${ids.t1}','교사1','teacher'),('${ids.t2}','교사2','teacher'),('${ids.s1}','학생1','student'),('${ids.s2}','학생2','student');
+      insert into public.ld_classes(id,teacher_id,name) values ('${ids.c1}','${ids.t1}','학급1'),('${ids.c2}','${ids.t2}','학급2');
+      insert into public.ld_memberships(class_id,student_id) values ('${ids.c1}','${ids.s1}'),('${ids.c2}','${ids.s2}');
+      insert into public.ld_assignments(id,class_id,title,prompt,rubric_confirmed,published) values ('${ids.a1}','${ids.c1}','과제1','질문',true,true),('${ids.a2}','${ids.c2}','과제2','질문',true,true);
+      insert into public.ld_sessions(id,assignment_id,student_id,character) values ('${ids.d1}','${ids.a1}','${ids.s1}','지민'),('${ids.d2}','${ids.a2}','${ids.s2}','지민');
+      insert into public.ld_messages(session_id,turn_index,role,content) select '${ids.d1}',n,'student','질문' from generate_series(1,10)n;
+      insert into public.ld_messages(session_id,turn_index,role,content) select '${ids.d1}',n,'assistant','답변' from generate_series(1,10)n;
+      insert into public.ld_submissions(id,session_id,version,content,character_count) values ('${ids.sub}','${ids.d1}',1,'요약',2);
+      insert into public.ld_feedback(submission_id,author_id,teacher_text,published_at) values ('${ids.sub}','${ids.t1}','공개 피드백',now());
+      insert into public.ld_teacher_feedback_drafts(submission_id,author_id,content) values ('${ids.sub}','${ids.t1}','비공개 초안');
+      insert into public.ld_turn_exceptions(session_id,teacher_id,reason) values ('${ids.d1}','${ids.t1}','비공개 사유');`);
+    const asUser=async id=>{await db.exec(`reset role; select set_config('request.jwt.claim.sub','${id}',false); set role authenticated;`);};
+    await asUser(ids.s1);
+    assert.equal((await db.query('select id from public.ld_sessions')).rows.length,1);
+    assert.equal((await db.query('select teacher_text from public.ld_feedback')).rows.length,1);
+    assert.equal((await db.query('select content from public.ld_teacher_feedback_drafts')).rows.length,0);
+    assert.equal((await db.query('select reason from public.ld_turn_exceptions')).rows.length,0);
+    assert.equal((await db.query(`select public.ld_has_turn_exception('${ids.d1}') as allowed`)).rows[0].allowed,true);
+    assert.equal((await db.query(`select public.ld_has_turn_exception('${ids.d2}') as allowed`)).rows[0].allowed,false);
+    await assert.rejects(db.exec(`insert into public.ld_messages(session_id,turn_index,role,content) values ('${ids.d2}',1,'student','타인 기록')`));
+    await asUser(ids.t2);
+    assert.equal((await db.query('select content from public.ld_teacher_feedback_drafts')).rows.length,0);
+    assert.equal((await db.query('select teacher_text from public.ld_feedback')).rows.length,0);
+    await asUser(ids.t1);
+    assert.equal((await db.query('select content from public.ld_teacher_feedback_drafts')).rows[0].content,'비공개 초안');
+    assert.equal((await db.query('select reason from public.ld_turn_exceptions')).rows[0].reason,'비공개 사유');
+    await assert.rejects(db.exec(`update public.ld_assignments set title='변경' where id='${ids.a1}'`));
+    await db.exec('reset role');
+    await assert.rejects(db.exec(`insert into public.ld_submissions(session_id,version,content,character_count) values ('${ids.d2}',1,'요약',2)`));
+    await db.exec(`insert into public.ld_messages(session_id,turn_index,role,content) select '${ids.d2}',n,'student','질문' from generate_series(1,10)n;
+      insert into public.ld_messages(session_id,turn_index,role,content) select '${ids.d2}',n,'assistant','답변' from generate_series(1,10)n;
+      insert into public.ld_messages(session_id,turn_index,role,content) values ('${ids.d2}',11,'student','대기 중');`);
+    await assert.rejects(db.exec(`insert into public.ld_submissions(session_id,version,content,character_count) values ('${ids.d2}',1,'요약',2)`));
+    await db.exec(`insert into public.ld_messages(session_id,turn_index,role,content) values ('${ids.d2}',11,'assistant','답변');
+      insert into public.ld_submissions(id,session_id,version,content,character_count) values ('cccccccc-cccc-4ccc-8ccc-cccccccccccc','${ids.d2}',1,'요약',2);`);
+    await assert.rejects(db.exec(`insert into public.ld_submissions(session_id,version,content,character_count) values ('${ids.d2}',2,'수정',2)`));
+    await db.exec(`insert into public.ld_feedback(submission_id,author_id,teacher_text,published_at) values ('cccccccc-cccc-4ccc-8ccc-cccccccccccc','${ids.t2}','피드백',now());
+      insert into public.ld_submissions(session_id,version,content,character_count) values ('${ids.d2}',2,'수정',2);`);
+    const second=(await db.query(`select id from public.ld_submissions where session_id='${ids.d2}' and version=2`)).rows[0].id;
+    await assert.rejects(db.exec(`insert into public.ld_feedback(submission_id,author_id,teacher_text,published_at,score,score_max) values ('${second}','${ids.t2}','피드백',now(),21,20)`));
+    await assert.rejects(db.exec(`insert into public.ld_feedback(submission_id,author_id,teacher_text,published_at,score) values ('${second}','${ids.t2}','피드백',now(),10)`));
+    await db.exec(`insert into public.ld_feedback(submission_id,author_id,teacher_text,published_at,score,score_max) values ('${second}','${ids.t2}','확정 피드백',now(),17.5,20)`);
+    await assert.rejects(db.exec(`insert into public.ld_messages(session_id,turn_index,role,content) values ('${ids.d2}',12,'student','사후 발화')`));
+    const voiceAssignment='dddddddd-dddd-4ddd-8ddd-dddddddddddd',voiceSession='eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee';
+    await db.exec(`insert into public.ld_assignments(id,class_id,title,prompt,rubric_confirmed,published) values ('${voiceAssignment}','${ids.c1}','음성 시험','질문',true,true);
+      insert into public.ld_sessions(id,assignment_id,student_id,character) values ('${voiceSession}','${voiceAssignment}','${ids.s1}','지민');`);
+    await asUser(ids.s1);
+    const voicePath=n=>`${ids.s1}/${voiceSession}/1/${n}-aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa.webm`;
+    for(let version=1;version<=3;version++)await db.exec(`insert into public.ld_summary_draft_versions(session_id,version,content) values ('${voiceSession}',${version},'시험 초안 ${version}')`);
+    await assert.rejects(db.exec(`insert into public.ld_summary_draft_versions(session_id,version,content) values ('${voiceSession}',4,'네 번째')`));
+    await assert.rejects(db.exec(`insert into public.ld_recordings(session_id,turn_index,version,object_path) values ('${voiceSession}',1,1,'${voicePath(1)}')`));
+    await assert.rejects(db.exec(`insert into storage.objects(bucket_id,name) values ('ld-voice','${voicePath(2)}')`));
+    for(let version=1;version<=4;version++){
+      await db.exec(`insert into storage.objects(bucket_id,name) values ('ld-voice','${voicePath(version)}');
+        insert into public.ld_recordings(session_id,turn_index,version,object_path) values ('${voiceSession}',1,${version},'${voicePath(version)}');`);
+    }
+    assert.equal((await db.query('select name from storage.objects')).rows.length,4);
+    await assert.rejects(db.exec(`insert into storage.objects(bucket_id,name) values ('ld-voice','${voicePath(5)}')`));
+    await assert.rejects(db.exec(`insert into public.ld_messages(session_id,turn_index,role,content,recording_id)
+      values ('${voiceSession}',1,'student','시험 발화',(select id from public.ld_recordings where session_id='${voiceSession}' and version=1))`));
+    await db.exec(`insert into public.ld_messages(session_id,turn_index,role,content,recording_id,transcript_original)
+      values ('${voiceSession}',1,'student','학생이 확인한 발화',(select id from public.ld_recordings where session_id='${voiceSession}' and version=4),'인식 원문');`);
+    const finalRecording=await db.query(`select r.version,m.content,m.transcript_original from public.ld_messages m join public.ld_recordings r on r.id=m.recording_id where m.session_id='${voiceSession}'`);
+    assert.deepEqual(finalRecording.rows,[{version:4,content:'학생이 확인한 발화',transcript_original:'인식 원문'}]);
+    await asUser(ids.s2);assert.equal((await db.query('select name from storage.objects')).rows.length,0);assert.equal((await db.query('select content from public.ld_summary_draft_versions')).rows.length,0);
+    await asUser(ids.t2);assert.equal((await db.query('select name from storage.objects')).rows.length,0);
+    await asUser(ids.t1);assert.equal((await db.query('select name from storage.objects')).rows.length,4);assert.equal((await db.query('select content from public.ld_summary_draft_versions')).rows.length,3);
+  }finally{await db.close();}
+});
