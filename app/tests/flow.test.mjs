@@ -156,3 +156,33 @@ test('제출 중 DB 상태 충돌은 재확인 안내로 반환한다', async()=
     assert.equal(call.res.status,409);assert.match(call.res.data.error,/새로고침/);
   }finally{globalThis.fetch=originalFetch;}
 });
+
+test('조합 한글과 이모지를 포함한 요약의 서버 글자 수를 저장한다',async()=>{
+  const originalFetch=globalThis.fetch;
+  const messages=Array.from({length:10},(_,i)=>[
+    {turn_index:i+1,role:'student',content:'질문'},
+    {turn_index:i+1,role:'assistant',content:'답변'}
+  ]).flat();
+  const writes=[];
+  try{
+    globalThis.fetch=async(url,options={})=>{
+      const u=new URL(url);
+      if(u.pathname==='/auth/v1/user')return ok({id:studentId});
+      if(u.pathname.endsWith('/ld_sessions'))return ok([{id:sessionId}]);
+      if(u.pathname.endsWith('/ld_messages'))return ok(messages);
+      if(u.pathname.endsWith('/ld_submissions')){
+        if(options.method==='POST'){writes.push(JSON.parse(options.body));return noContent();}
+        return ok([]);
+      }
+      throw Error(`예상하지 못한 요청: ${u.pathname}`);
+    };
+    const unit='가👩‍👧';
+    for(const [content,expectedStatus,expectedCount] of [[unit.repeat(149)+'가',201,299],[unit.repeat(150),201,300],[unit.repeat(150)+'가',400,null]]){
+      const call=caller({sessionId,version:1,content});await submit(call.req,call.res);
+      assert.equal(call.res.status,expectedStatus);
+      if(expectedCount!==null){assert.equal(writes.at(-1).character_count,expectedCount);assert.equal(writes.at(-1).content,content);}
+    }
+    assert.equal(writes.length,2);
+  }finally{globalThis.fetch=originalFetch;}
+});
+
