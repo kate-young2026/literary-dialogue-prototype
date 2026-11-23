@@ -14,7 +14,7 @@ const datasets={
   ld_sessions:[{id:session,student_id:student,assignment_id:assignment}],
   ld_submissions:[{id:submission,session_id:session,version:1,content:'시험 요약',ld_sessions:{student_id:student,assignment_id:assignment,character:'지민'}}],
   ld_messages:[{turn_index:1,role:'student',content:'시험 질문'},{turn_index:1,role:'assistant',content:'시험 답변'}],
-  ld_feedback:[],ld_teacher_feedback_drafts:[],ld_summary_draft_versions:[],ld_ai_drafts:[],ld_turn_exceptions:[],ld_reports:[]
+  ld_feedback:[],ld_teacher_feedback_drafts:[],ld_summary_draft_versions:[],ld_student_details:[],ld_voice_consent:[],ld_ai_drafts:[],ld_turn_exceptions:[],ld_reports:[]
 };
 const server=http.createServer(async (req,res)=>{
   res.setHeader('access-control-allow-origin','*');

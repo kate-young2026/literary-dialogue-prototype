@@ -6,6 +6,22 @@ create table if not exists public.ld_profiles (
   display_name text not null,
   role text not null check (role in ('student','teacher'))
 );
+create table if not exists public.ld_student_details (
+  user_id uuid primary key references public.ld_profiles(id),
+  school text not null default '' check (length(school)<=100),
+  grade text not null default '' check (length(grade)<=10),
+  class_name text not null default '' check (length(class_name)<=20),
+  student_number text not null default '' check (length(student_number)<=20),
+  student_name text not null default '' check (length(student_name)<=100),
+  updated_at timestamptz not null default now()
+);
+create table if not exists public.ld_voice_consent (
+  user_id uuid primary key references public.ld_profiles(id),
+  enabled boolean not null default false,
+  notice text not null default '' check (length(notice)<=3000),
+  updated_at timestamptz not null default now(),
+  check (not enabled or length(trim(notice))>0)
+);
 create table if not exists public.ld_classes (
   id uuid primary key default gen_random_uuid(),
   teacher_id uuid not null references public.ld_profiles(id),
@@ -200,6 +216,20 @@ returns boolean language sql stable security definer set search_path=public as $
 $$;
 revoke all on function public.ld_has_turn_exception(uuid) from public, anon;
 grant execute on function public.ld_has_turn_exception(uuid) to authenticated;
+create or replace function public.ld_voice_allowed(p_session uuid)
+returns boolean language sql stable security definer set search_path=public as $$
+  select (public.ld_owns_session(p_session) or public.ld_teaches_session(p_session))
+    and exists(select 1 from ld_sessions s join ld_voice_consent c on c.user_id=s.student_id
+      where s.id=p_session and c.enabled)
+$$;
+create or replace function public.ld_voice_object_exists(p_session uuid,p_path text)
+returns boolean language sql stable security definer set search_path=public as $$
+  select public.ld_owns_session(p_session)
+    and p_path like (auth.uid()::text || '/' || p_session::text || '/%')
+    and exists(select 1 from storage.objects o where o.bucket_id='ld-voice' and o.name=p_path)
+$$;
+revoke all on function public.ld_voice_allowed(uuid), public.ld_voice_object_exists(uuid,text) from public, anon;
+grant execute on function public.ld_voice_allowed(uuid), public.ld_voice_object_exists(uuid,text) to authenticated;
 create or replace function public.ld_can_start_turn(p_session uuid,p_turn integer)
 returns boolean language sql stable security definer set search_path=public as $$
   select public.ld_owns_session(p_session)
@@ -221,6 +251,8 @@ returns integer language sql stable security definer set search_path=public as $
 $$;
 
 alter table public.ld_profiles enable row level security;
+alter table public.ld_student_details enable row level security;
+alter table public.ld_voice_consent enable row level security;
 alter table public.ld_classes enable row level security;
 alter table public.ld_memberships enable row level security;
 alter table public.ld_assignments enable row level security;
@@ -236,9 +268,10 @@ alter table public.ld_feedback enable row level security;
 alter table public.ld_teacher_feedback_drafts enable row level security;
 alter table public.ld_ai_drafts enable row level security;
 alter table public.ld_rubric_drafts enable row level security;
-revoke all on public.ld_profiles, public.ld_classes, public.ld_memberships, public.ld_assignments,
+revoke all on public.ld_profiles, public.ld_student_details, public.ld_voice_consent, public.ld_classes, public.ld_memberships, public.ld_assignments,
   public.ld_sessions, public.ld_turn_exceptions, public.ld_messages, public.ld_recordings, public.ld_reports, public.ld_submissions, public.ld_summary_drafts, public.ld_summary_draft_versions, public.ld_feedback, public.ld_teacher_feedback_drafts, public.ld_ai_drafts, public.ld_rubric_drafts from public, anon, authenticated;
 grant select on public.ld_profiles, public.ld_classes, public.ld_memberships, public.ld_assignments to authenticated;
+grant select,insert,update on public.ld_student_details, public.ld_voice_consent to authenticated;
 grant select, insert on public.ld_sessions, public.ld_messages, public.ld_recordings to authenticated;
 grant select, insert on public.ld_turn_exceptions to authenticated;
 grant select, insert on public.ld_reports to authenticated;
@@ -253,6 +286,12 @@ grant select on public.ld_rubric_drafts to authenticated;
 grant insert on public.ld_assignments to authenticated;
 
 create policy profiles_read on public.ld_profiles for select to authenticated using (id=auth.uid() or public.ld_teaches_student(id));
+create policy student_details_read on public.ld_student_details for select to authenticated using (user_id=auth.uid() or public.ld_teaches_student(user_id));
+create policy student_details_insert on public.ld_student_details for insert to authenticated with check (user_id=auth.uid() and exists(select 1 from public.ld_profiles p where p.id=auth.uid() and p.role='student'));
+create policy student_details_update on public.ld_student_details for update to authenticated using (user_id=auth.uid()) with check (user_id=auth.uid());
+create policy voice_consent_read on public.ld_voice_consent for select to authenticated using (user_id=auth.uid());
+create policy voice_consent_insert on public.ld_voice_consent for insert to authenticated with check (user_id=auth.uid() and exists(select 1 from public.ld_profiles p where p.id=auth.uid() and p.role='student'));
+create policy voice_consent_update on public.ld_voice_consent for update to authenticated using (user_id=auth.uid()) with check (user_id=auth.uid());
 create policy classes_read on public.ld_classes for select to authenticated using (teacher_id=auth.uid() or public.ld_member_of(id));
 create policy memberships_read on public.ld_memberships for select to authenticated using (student_id=auth.uid() or public.ld_teaches_class(class_id));
 create policy assignments_read on public.ld_assignments for select to authenticated using (exists(select 1 from public.ld_classes c where c.id=class_id and c.teacher_id=auth.uid()) or (published and exists(select 1 from public.ld_memberships m where m.class_id=ld_assignments.class_id and m.student_id=auth.uid())));
@@ -279,7 +318,7 @@ create policy recordings_create on public.ld_recordings for insert to authentica
   public.ld_can_start_turn(session_id,turn_index)
   and version=public.ld_next_recording_version(session_id,turn_index)
   and object_path like (auth.uid()::text || '/' || session_id::text || '/' || turn_index::text || '/' || version::text || '-%')
-  and exists(select 1 from storage.objects o where o.bucket_id='ld-voice' and o.name=ld_recordings.object_path)
+  and public.ld_voice_object_exists(session_id,object_path)
 );
 create policy submissions_read on public.ld_submissions for select to authenticated using (public.ld_owns_session(session_id) or public.ld_teaches_session(session_id));
 create policy summary_draft_read on public.ld_summary_drafts for select to authenticated using (public.ld_owns_session(session_id));

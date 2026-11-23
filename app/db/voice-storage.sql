@@ -14,6 +14,6 @@ create policy ld_voice_insert on storage.objects for insert to authenticated wit
 );
 create policy ld_voice_read on storage.objects for select to authenticated using (
   bucket_id='ld-voice' and exists (select 1 from public.ld_sessions s where s.id::text=(storage.foldername(name))[2]
-    and (s.student_id=auth.uid() or public.ld_teaches_session(s.id)))
+    and public.ld_voice_allowed(s.id))
 );
 commit;

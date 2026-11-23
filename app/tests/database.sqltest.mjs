@@ -22,6 +22,7 @@ test('PostgreSQL 호환 DB에서 스키마와 학급별 RLS를 검증한다',asy
     await db.exec(await readFile(new URL('../db/voice-storage.sql',import.meta.url),'utf8'));
     await db.exec(`insert into auth.users(id) values ('${ids.t1}'),('${ids.t2}'),('${ids.s1}'),('${ids.s2}');
       insert into public.ld_profiles(id,display_name,role) values ('${ids.t1}','교사1','teacher'),('${ids.t2}','교사2','teacher'),('${ids.s1}','학생1','student'),('${ids.s2}','학생2','student');
+      insert into public.ld_student_details(user_id,school,grade,class_name,student_number,student_name) values ('${ids.s1}','시험학교','1','1','1','학생1'),('${ids.s2}','시험학교','1','2','2','학생2');
       insert into public.ld_classes(id,teacher_id,name) values ('${ids.c1}','${ids.t1}','학급1'),('${ids.c2}','${ids.t2}','학급2');
       insert into public.ld_memberships(class_id,student_id) values ('${ids.c1}','${ids.s1}'),('${ids.c2}','${ids.s2}');
       insert into public.ld_assignments(id,class_id,title,prompt,rubric_confirmed,published) values ('${ids.a1}','${ids.c1}','과제1','질문',true,true),('${ids.a2}','${ids.c2}','과제2','질문',true,true);
@@ -35,6 +36,7 @@ test('PostgreSQL 호환 DB에서 스키마와 학급별 RLS를 검증한다',asy
     const asUser=async id=>{await db.exec(`reset role; select set_config('request.jwt.claim.sub','${id}',false); set role authenticated;`);};
     await asUser(ids.s1);
     assert.equal((await db.query('select id from public.ld_sessions')).rows.length,1);
+    assert.deepEqual((await db.query('select student_name from public.ld_student_details')).rows.map(x=>x.student_name),['학생1']);
     assert.equal((await db.query('select teacher_text from public.ld_feedback')).rows.length,1);
     assert.equal((await db.query('select content from public.ld_teacher_feedback_drafts')).rows.length,0);
     assert.equal((await db.query('select reason from public.ld_turn_exceptions')).rows.length,0);
@@ -42,9 +44,11 @@ test('PostgreSQL 호환 DB에서 스키마와 학급별 RLS를 검증한다',asy
     assert.equal((await db.query(`select public.ld_has_turn_exception('${ids.d2}') as allowed`)).rows[0].allowed,false);
     await assert.rejects(db.exec(`insert into public.ld_messages(session_id,turn_index,role,content) values ('${ids.d2}',1,'student','타인 기록')`));
     await asUser(ids.t2);
+    assert.deepEqual((await db.query('select student_name from public.ld_student_details')).rows.map(x=>x.student_name),['학생2']);
     assert.equal((await db.query('select content from public.ld_teacher_feedback_drafts')).rows.length,0);
     assert.equal((await db.query('select teacher_text from public.ld_feedback')).rows.length,0);
     await asUser(ids.t1);
+    assert.deepEqual((await db.query('select student_name from public.ld_student_details')).rows.map(x=>x.student_name),['학생1']);
     assert.equal((await db.query('select content from public.ld_teacher_feedback_drafts')).rows[0].content,'비공개 초안');
     assert.equal((await db.query('select reason from public.ld_turn_exceptions')).rows[0].reason,'비공개 사유');
     await assert.rejects(db.exec(`update public.ld_assignments set title='변경' where id='${ids.a1}'`));
@@ -67,6 +71,8 @@ test('PostgreSQL 호환 DB에서 스키마와 학급별 RLS를 검증한다',asy
     const voiceAssignment='dddddddd-dddd-4ddd-8ddd-dddddddddddd',voiceSession='eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee';
     await db.exec(`insert into public.ld_assignments(id,class_id,title,prompt,rubric_confirmed,published) values ('${voiceAssignment}','${ids.c1}','음성 시험','질문',true,true);
       insert into public.ld_sessions(id,assignment_id,student_id,character) values ('${voiceSession}','${voiceAssignment}','${ids.s1}','지민');`);
+    await db.exec(`insert into public.ld_assignments(id,class_id,title,prompt,rubric_confirmed,published) values ('ffffffff-ffff-4fff-8fff-ffffffffffff','${ids.c1}','작가 AI 시험','질문',true,true);
+      insert into public.ld_sessions(assignment_id,student_id,character) values ('ffffffff-ffff-4fff-8fff-ffffffffffff','${ids.s1}','김초엽 작가 AI');`);
     await asUser(ids.s1);
     const voicePath=n=>`${ids.s1}/${voiceSession}/1/${n}-aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa.webm`;
     for(let version=1;version<=3;version++)await db.exec(`insert into public.ld_summary_draft_versions(session_id,version,content) values ('${voiceSession}',${version},'시험 초안 ${version}')`);
@@ -77,6 +83,8 @@ test('PostgreSQL 호환 DB에서 스키마와 학급별 RLS를 검증한다',asy
       await db.exec(`insert into storage.objects(bucket_id,name) values ('ld-voice','${voicePath(version)}');
         insert into public.ld_recordings(session_id,turn_index,version,object_path) values ('${voiceSession}',1,${version},'${voicePath(version)}');`);
     }
+    assert.equal((await db.query('select name from storage.objects')).rows.length,0);
+    await db.exec(`insert into public.ld_voice_consent(user_id,enabled,notice) values ('${ids.s1}',true,'시험 안내');`);
     assert.equal((await db.query('select name from storage.objects')).rows.length,4);
     await assert.rejects(db.exec(`insert into storage.objects(bucket_id,name) values ('ld-voice','${voicePath(5)}')`));
     await assert.rejects(db.exec(`insert into public.ld_messages(session_id,turn_index,role,content,recording_id)
@@ -88,5 +96,8 @@ test('PostgreSQL 호환 DB에서 스키마와 학급별 RLS를 검증한다',asy
     await asUser(ids.s2);assert.equal((await db.query('select name from storage.objects')).rows.length,0);assert.equal((await db.query('select content from public.ld_summary_draft_versions')).rows.length,0);
     await asUser(ids.t2);assert.equal((await db.query('select name from storage.objects')).rows.length,0);
     await asUser(ids.t1);assert.equal((await db.query('select name from storage.objects')).rows.length,4);assert.equal((await db.query('select content from public.ld_summary_draft_versions')).rows.length,3);
+    await asUser(ids.s1);await db.exec(`update public.ld_voice_consent set enabled=false where user_id='${ids.s1}'`);
+    assert.equal((await db.query('select name from storage.objects')).rows.length,0);
+    await asUser(ids.t1);assert.equal((await db.query('select name from storage.objects')).rows.length,0);
   }finally{await db.close();}
 });

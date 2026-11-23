@@ -25,6 +25,7 @@ test('가장 마지막 녹음만 가져와 음성 인식한다',async()=>{
       const u=new URL(url);calls.push(u);
       if(u.pathname==='/auth/v1/user')return ok({id:studentId});
       if(u.pathname.endsWith('/ld_sessions'))return ok([{id:sessionId}]);
+      if(u.pathname.endsWith('/rpc/ld_voice_allowed'))return ok(true);
       if(u.pathname.endsWith('/ld_recordings')){
         assert.equal(u.searchParams.get('order'),'version.desc');
         assert.equal(u.searchParams.get('limit'),'1');
@@ -41,6 +42,18 @@ test('가장 마지막 녹음만 가져와 음성 인식한다',async()=>{
     assert.equal(c.res.status,200);assert.equal(c.res.data.version,4);assert.equal(c.res.data.text,'학생의 말');
     assert.equal(calls.filter(u=>u.pathname.startsWith('/storage/v1/')).length,1);
     assert.ok(calls.some(u=>u.pathname.endsWith(objectPath)));
+  }finally{globalThis.fetch=original;}
+});
+test('이용 비활성 상태에서는 음성 파일을 읽거나 인식하지 않는다',async()=>{
+  const original=globalThis.fetch;let read=false;
+  try{
+    globalThis.fetch=async(url)=>{const u=new URL(url);
+      if(u.pathname==='/auth/v1/user')return ok({id:studentId});
+      if(u.pathname.endsWith('/ld_sessions'))return ok([{id:sessionId}]);
+      if(u.pathname.endsWith('/rpc/ld_voice_allowed'))return ok(false);
+      read=true;throw Error('비활성 상태에서 녹음에 접근했습니다.');
+    };
+    const c=call();await transcribe(c.req,c.res);assert.equal(c.res.status,403);assert.equal(read,false);
   }finally{globalThis.fetch=original;}
 });
 test('다른 학생의 세션은 녹음 조회 전에 차단한다',async()=>{

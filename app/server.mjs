@@ -115,6 +115,8 @@ export async function transcribe(req,res) {
   if(!/^[0-9a-f-]{36}$/i.test(data.sessionId||'')||!Number.isInteger(data.turnIndex)||data.turnIndex<1)return json(res,400,{error:'녹음 정보가 올바르지 않습니다.'});
   const sessions=await supa(`/rest/v1/ld_sessions?id=eq.${encodeURIComponent(data.sessionId)}&student_id=eq.${encodeURIComponent(user.id)}&select=id`,token);
   if(!sessions.length)return json(res,403,{error:'녹음에 접근할 수 없습니다.'});
+  const active=await supa('/rest/v1/rpc/ld_voice_allowed',token,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({p_session:data.sessionId})});
+  if(!active)return json(res,403,{error:'녹음 이용 동의를 저장한 뒤 텍스트로 변환할 수 있습니다.'});
   const versions=await supa(`/rest/v1/ld_recordings?session_id=eq.${encodeURIComponent(data.sessionId)}&turn_index=eq.${data.turnIndex}&select=object_path,version&order=version.desc&limit=1`,token);
   if(!versions.length)return json(res,400,{error:'저장된 녹음이 없습니다.'});
   const objectPath=versions[0].object_path;
