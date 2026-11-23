@@ -11,7 +11,7 @@ const state={details:[],consent:[],drafts:[],submissions:[],feedback:[],revision
 const datasets={
   ld_profiles:[{id:uid,role:'student',display_name:'시험 학생'}],
   literary_works:[{id:1,title:'관내분실',author:'김초엽',category:'현대소설',period:'2010년대 이후',content:{}}],
-  ld_assignments:[{id:aid,work_id:1,title:'시험 과제',prompt:'다른 선택을 했다면?',material:{summary:'교사가 확인한 작품 설명'}}],
+  ld_assignments:[{id:aid,work_id:1,title:'시험 과제',rubric:[{text:'교사가 확정한 시험 평가 기준'}],prompt:'다른 선택을 했다면?',material:{summary:'교사가 확인한 작품 설명'}}],
   ld_sessions:[{id:sid,assignment_id:aid,student_id:uid,character:'지민'}],ld_messages:messages,ld_recordings:[]
 };
 const tableState={ld_student_details:'details',ld_voice_consent:'consent',ld_summary_draft_versions:'drafts',ld_submissions:'submissions',ld_feedback:'feedback',ld_summary_drafts:'revision'};
