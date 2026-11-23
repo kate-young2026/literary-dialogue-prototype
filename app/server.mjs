@@ -4,9 +4,11 @@ import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { countCharacters, countTurns, validSummary } from './lib/rules.mjs';
 import { evaluationEvidence, clippedText } from './lib/evidence.mjs';
+import { hostingSettings, allowsOrigin } from './lib/hosting.mjs';
 
 const root = path.dirname(fileURLToPath(import.meta.url));
-const port = Number(process.env.PORT || 4173);
+const hosting = hostingSettings();
+const { port, host } = hosting;
 const sb = (process.env.SUPABASE_URL || '').replace(/\/$/, '');
 const anon = process.env.SUPABASE_PUBLISHABLE_KEY || '';
 const secret = process.env.SUPABASE_SECRET_KEY || '';
@@ -191,7 +193,7 @@ export const server = http.createServer(async (req, res) => {
     if (req.method === 'GET' && url.pathname === '/api/works') return await works(req,res);
     if (req.method === 'POST' && ['/api/chat','/api/submission','/api/transcribe','/api/draft'].includes(url.pathname)) {
       const origin = req.headers.origin;
-      if (origin && origin !== `http://localhost:${port}` && origin !== `http://127.0.0.1:${port}`) return json(res,403,{error:'요청 출처를 확인할 수 없습니다.'});
+      if (!allowsOrigin(origin, hosting)) return json(res,403,{error:'요청 출처를 확인할 수 없습니다.'});
       if(url.pathname==='/api/chat')return await chat(req,res);
       if(url.pathname==='/api/submission')return await submit(req,res);
       if(url.pathname==='/api/transcribe')return await transcribe(req,res);
@@ -205,4 +207,5 @@ export const server = http.createServer(async (req, res) => {
     res.writeHead(200, {'content-type':mime[path.extname(name)] || 'application/octet-stream','x-content-type-options':'nosniff'}); res.end(content);
   } catch (error) { json(res, 500, {error:'요청 처리 중 문제가 발생했습니다.'}); }
 });
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) server.listen(port, '127.0.0.1', () => console.log(`http://127.0.0.1:${port}`));
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) server.listen(port, host, () => console.log(`서버 실행: ${host}:${port}`));
+

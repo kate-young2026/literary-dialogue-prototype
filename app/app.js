@@ -7,6 +7,7 @@ let draftSnapshots=[];
 let turnException=false;
 let recorder, recordingChunks=[], voiceRows=[], originalTranscript='', chosenRecording=null, rubricDraftId=null, inputMode='text';
 let voiceConsent=false;
+let teacherAccessRequested=false;
 let summaryDirty=false;
 const teacherEdits=new Map();
 const teacherScores=new Map();
@@ -71,6 +72,13 @@ async function loadFeedback() {
   if ([1,2].includes(submissionVersion) && !$('summary').value) $('summary').value=(submissionVersion===1?draftSnapshots.at(-1)?.content:drafts.find(d=>d.version===2)?.content) || (submissionVersion===2?submissions.find(s=>s.version===1)?.content:'') || '';
   $('counter').textContent=`${countCharacters($('summary').value)} / 300자`;
 }
+$('teacher-access').onclick=()=>{
+  if(profile?.role==='teacher'&&!$('teacher').hidden){$('teacher').scrollIntoView({behavior:'smooth',block:'start'});return;}
+  teacherAccessRequested=true;
+  if(profile?.role==='student'){status('교사용 화면은 교사 계정으로 로그인한 뒤 이용할 수 있습니다.');$('login-panel').scrollIntoView({behavior:'smooth',block:'start'});return;}
+  status('교사 계정으로 로그인하면 담당 학급의 학습 기록과 평가를 볼 수 있습니다.');
+  $('login-panel').scrollIntoView({behavior:'smooth',block:'start'});$('email').focus({preventScroll:true});
+};
 async function signedIn() {
   const profiles=await request(`/rest/v1/ld_profiles?id=eq.${auth.user.id}&select=*`);
   if (!profiles.length) throw Error('교사가 수업 계정을 등록해야 합니다.');
@@ -80,7 +88,7 @@ async function signedIn() {
   const workResponse=await fetch('/api/works',{headers:{authorization:`Bearer ${auth.access_token}`}});
   if(!workResponse.ok)throw Error('작품 DB를 불러오지 못했습니다. 서비스 연결을 확인해 주세요.');
   if(workResponse.ok){works=await workResponse.json();$('teacher-work').innerHTML=works.filter(isPilotWork).map(w=>`<option value="${w.id}">${escape(w.category)} · ${escape(w.period)} / ${escape(w.title)} (${escape(w.author)})</option>`).join('');}
-  if (profile.role==='teacher') { $('teacher').hidden=false; await loadTeacher(); return; }
+  if (profile.role==='teacher') { $('teacher').hidden=false; await loadTeacher(); if(teacherAccessRequested){teacherAccessRequested=false;$('teacher').scrollIntoView({behavior:'smooth',block:'start'});} return; }
   const details=await request(`/rest/v1/ld_student_details?user_id=eq.${auth.user.id}&select=*`);
   const info=details[0]||{};
   for(const [id,key] of [['school','school'],['grade','grade'],['class-name','class_name'],['student-number','student_number'],['student-name','student_name']])$(id).value=info[key]||'';

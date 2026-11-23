@@ -5,9 +5,10 @@ const css=await readFile(new URL('../style.css',import.meta.url),'utf8');
 const rubric=JSON.stringify(pilotRubric).replaceAll('<','\\u003c');
 const previewScript=`<script>
 document.getElementById('rubric-guide').textContent=${rubric};
-document.querySelectorAll('button').forEach(b=>{if(!b.closest('#quiz'))b.disabled=true;});
+document.querySelectorAll('button').forEach(b=>{if(!b.closest('#quiz')&&b.id!=='teacher-access')b.disabled=true;});
 document.querySelectorAll('#login-form input, #student-settings input, #chat-form textarea').forEach(e=>e.disabled=true);
 document.getElementById('status').textContent='공개 화면 시안입니다. 로그인과 데이터 저장은 연결되지 않았습니다.';
+document.getElementById('teacher-access').addEventListener('click',()=>{document.getElementById('status').textContent='교사용 학습 기록과 평가 화면은 실제 서버 연결 후 교사 로그인으로 이용할 수 있습니다.';document.getElementById('login-panel').scrollIntoView({behavior:'smooth',block:'start'});});
 document.getElementById('summary').addEventListener('input',e=>{document.getElementById('counter').textContent=[...new Intl.Segmenter('ko',{granularity:'grapheme'}).segment(e.target.value)].length+' / 300자';});
 document.getElementById('quiz-form').addEventListener('submit',e=>{e.preventDefault();const answers=['0','1','2'],notes=['지민은 어머니의 마인드를 찾습니다.','기술이 인물과 사건에 미치는 영향을 생각합니다.','작품 근거와 여러 관점을 살핍니다.'];document.getElementById('quiz-result').textContent=answers.map((a,i)=>{const v=document.querySelector('input[name="q'+(i+1)+'"]:checked');return (i+1)+'번: '+(!v?'선택해 보세요':v.value===a?'잘 살펴봤어요':'다시 생각해 보세요')+' · '+notes[i];}).join(' / ');});
 </script>`;
@@ -20,3 +21,4 @@ if(output.includes('src="/app.js"')||!output.includes('공개 시안'))throw Err
 await mkdir(new URL('../public-preview/',import.meta.url),{recursive:true});
 await writeFile(new URL('../public-preview/index.html',import.meta.url),output,'utf8');
 console.log('Public preview built without application secrets or live API calls.');
+
