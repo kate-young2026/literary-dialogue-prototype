@@ -35,6 +35,12 @@ try{
   await admin('ld_profiles',[{id:teacher.id,display_name:'가상 교사',role:'teacher'},{id:student.id,display_name:'가상 학생',role:'student'},{id:otherStudent.id,display_name:'다른 가상 학생',role:'student'},{id:otherTeacher.id,display_name:'다른 가상 교사',role:'teacher'}]);
   const klass=(await admin('ld_classes',{teacher_id:teacher.id,name:`자동 시험 ${runId}`}))[0];
   await admin('ld_memberships',{class_id:klass.id,student_id:student.id});
+  const schoolPath=`/rest/v1/ld_classes?id=eq.${klass.id}`;
+  const updateSchool=(token,school)=>call(schoolPath,{method:'PATCH',token,data:{school},prefer:'return=representation'});
+  assert.equal((await updateSchool(teacher.token,'가상 시험학교')).body.length,1);
+  assert.equal((await updateSchool(student.token,'임의 학생 변경')).body.length,0);
+  assert.equal((await updateSchool(otherTeacher.token,'다른 교사 변경')).body.length,0);
+  assert.equal((await userRead(`ld_classes?id=eq.${klass.id}&select=school`,student.token))[0].school,'가상 시험학교');
   const work=await must('/rest/v1/literary_works?select=id&title=eq.%EA%B4%80%EB%82%B4%EB%B6%84%EC%8B%A4&limit=1',{service:true});assert.equal(work.length,1);
   const proposeRubric=token=>fetch(`${appUrl}/api/draft`,{method:'POST',headers:{authorization:`Bearer ${token}`,'content-type':'application/json'},body:JSON.stringify({type:'rubric',classId:klass.id})});
   assert.equal((await proposeRubric(student.token)).status,403);
@@ -87,4 +93,3 @@ try{
   console.log('성공: 교사 루브릭 제안·확정, 앱 대화 10차례, 응답 장애 후 재시도·중복 방지, 초안 3개, 동시 제출 중복 차단, 앱 경유 1·2차 제출·평가 초안, 피드백과 접근 차단');
   console.log('시험 데이터는 별도 시험 프로젝트에 남아 있으며 실제 AI와 음성 기능은 시험하지 않았습니다.');
 }catch(error){console.error(`시험 중단: ${error.message}`);console.error('이미 생성된 가상 데이터는 시험 프로젝트에 남아 있을 수 있습니다.');process.exitCode=1;}finally{globalThis.fetch=realFetch;await new Promise(resolve=>server.close(resolve));}
-

@@ -25,7 +25,8 @@ create table if not exists public.ld_voice_consent (
 create table if not exists public.ld_classes (
   id uuid primary key default gen_random_uuid(),
   teacher_id uuid not null references public.ld_profiles(id),
-  name text not null
+  name text not null,
+  school text not null default '' check (length(school)<=100)
 );
 create table if not exists public.ld_memberships (
   class_id uuid not null references public.ld_classes(id),
@@ -280,6 +281,7 @@ alter table public.ld_rubric_drafts enable row level security;
 revoke all on public.ld_profiles, public.ld_student_details, public.ld_voice_consent, public.ld_classes, public.ld_memberships, public.ld_assignments,
   public.ld_sessions, public.ld_turn_exceptions, public.ld_messages, public.ld_recordings, public.ld_reports, public.ld_submissions, public.ld_summary_drafts, public.ld_summary_draft_versions, public.ld_feedback, public.ld_teacher_feedback_drafts, public.ld_ai_drafts, public.ld_rubric_drafts from public, anon, authenticated;
 grant select on public.ld_profiles, public.ld_classes, public.ld_memberships, public.ld_assignments to authenticated;
+grant update (school) on public.ld_classes to authenticated;
 grant select,insert,update on public.ld_student_details, public.ld_voice_consent to authenticated;
 grant select, insert on public.ld_sessions, public.ld_messages, public.ld_recordings to authenticated;
 grant select, insert on public.ld_turn_exceptions to authenticated;
@@ -302,6 +304,7 @@ create policy voice_consent_read on public.ld_voice_consent for select to authen
 create policy voice_consent_insert on public.ld_voice_consent for insert to authenticated with check (user_id=auth.uid() and exists(select 1 from public.ld_profiles p where p.id=auth.uid() and p.role='student'));
 create policy voice_consent_update on public.ld_voice_consent for update to authenticated using (user_id=auth.uid()) with check (user_id=auth.uid());
 create policy classes_read on public.ld_classes for select to authenticated using (teacher_id=auth.uid() or public.ld_member_of(id));
+create policy classes_update_school on public.ld_classes for update to authenticated using (teacher_id=auth.uid()) with check (teacher_id=auth.uid());
 create policy memberships_read on public.ld_memberships for select to authenticated using (student_id=auth.uid() or public.ld_teaches_class(class_id));
 create policy assignments_read on public.ld_assignments for select to authenticated using (exists(select 1 from public.ld_classes c where c.id=class_id and c.teacher_id=auth.uid()) or (published and exists(select 1 from public.ld_memberships m where m.class_id=ld_assignments.class_id and m.student_id=auth.uid())));
 create policy assignments_create on public.ld_assignments for insert to authenticated with check (

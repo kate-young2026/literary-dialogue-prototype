@@ -8,9 +8,9 @@ const session='55555555-5555-4555-8555-555555555555';
 const submission='66666666-6666-4666-8666-666666666666';
 const datasets={
   ld_profiles:[{id:teacher,role:'teacher',display_name:'시험 교사'},{id:student,role:'student',display_name:'시험 학생'}],
-  ld_classes:[{id:classId,name:'시험 학급',teacher_id:teacher}],
+  ld_classes:[{id:classId,name:'시험 학급',school:'시험 고등학교',teacher_id:teacher}],
   literary_works:[{id:1,title:'관내분실',author:'김초엽',category:'현대소설',period:'2010년대 이후',content:{}}],
-  ld_assignments:[{id:assignment,title:'시험 과제',rubric:[{text:'교사 확인 루브릭'}]}],
+  ld_assignments:[{id:assignment,class_id:classId,title:'시험 과제',rubric:[{text:'교사 확인 루브릭'}]}],
   ld_sessions:[{id:session,student_id:student,assignment_id:assignment}],
   ld_submissions:[{id:submission,session_id:session,version:1,content:'시험 요약',ld_sessions:{student_id:student,assignment_id:assignment,character:'지민'}}],
   ld_messages:[{turn_index:1,role:'student',content:'시험 질문'},{turn_index:1,role:'assistant',content:'시험 답변'}],

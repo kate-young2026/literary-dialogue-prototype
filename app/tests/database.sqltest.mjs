@@ -34,7 +34,12 @@ test('PostgreSQL 호환 DB에서 스키마와 학급별 RLS를 검증한다',asy
       insert into public.ld_teacher_feedback_drafts(submission_id,author_id,content) values ('${ids.sub}','${ids.t1}','비공개 초안');
       insert into public.ld_turn_exceptions(session_id,teacher_id,reason) values ('${ids.d1}','${ids.t1}','비공개 사유');`);
     const asUser=async id=>{await db.exec(`reset role; select set_config('request.jwt.claim.sub','${id}',false); set role authenticated;`);};
+    await asUser(ids.t1);
+    assert.equal((await db.query(`update public.ld_classes set school='시험학교' where id='${ids.c1}' returning id`)).rows.length,1);
+    assert.equal((await db.query(`update public.ld_classes set school='다른학교' where id='${ids.c2}' returning id`)).rows.length,0);
+    await assert.rejects(db.exec(`update public.ld_classes set name='변경' where id='${ids.c1}'`));
     await asUser(ids.s1);
+    assert.equal((await db.query(`update public.ld_classes set school='임의변경' where id='${ids.c1}' returning id`)).rows.length,0);
     assert.equal((await db.query('select id from public.ld_sessions')).rows.length,1);
     assert.deepEqual((await db.query('select student_name from public.ld_student_details')).rows.map(x=>x.student_name),['학생1']);
     assert.equal((await db.query('select teacher_text from public.ld_feedback')).rows.length,1);
