@@ -1,0 +1,62 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {readFile} from 'node:fs/promises';
+import {PGlite} from '@electric-sql/pglite';
+
+test('재발급은 이전 코드에 연결된 세션의 DB 접근을 차단한다',async()=>{
+  const db=new PGlite();
+  const teacher='11111111-1111-4111-8111-111111111111',student='22222222-2222-4222-8222-222222222222',other='33333333-3333-4333-8333-333333333333',klass='44444444-4444-4444-8444-444444444444',oldSession='55555555-5555-4555-8555-555555555555',newSession='66666666-6666-4666-8666-666666666666';
+  try {
+    await db.exec(`create role anon; create role authenticated; create role service_role;
+      create schema auth; create schema storage;
+      create function auth.uid() returns uuid language sql stable as $$select nullif(current_setting('request.jwt.claim.sub',true),'')::uuid$$;
+      create function auth.jwt() returns jsonb language sql stable as $$select jsonb_build_object('session_id',nullif(current_setting('request.jwt.claim.session_id',true),''))$$;
+      grant usage on schema auth,storage to authenticated;
+      create table public.ld_profiles(id uuid primary key,role text not null);
+      create table public.ld_classes(id uuid primary key,teacher_id uuid not null references public.ld_profiles);
+      create table public.ld_memberships(class_id uuid references public.ld_classes,student_id uuid references public.ld_profiles,primary key(class_id,student_id));
+      create table public.ld_sessions(id uuid primary key,student_id uuid);
+      create table public.ld_records(student_id uuid,content text);
+      alter table public.ld_records enable row level security;
+      grant select on public.ld_records to authenticated;
+      create policy own_records on public.ld_records for select to authenticated using(student_id=auth.uid());
+      create table storage.objects(bucket_id text,owner_id uuid);
+      alter table storage.objects enable row level security;
+      grant select on storage.objects to authenticated;
+      create policy own_object on storage.objects for select to authenticated using(owner_id=auth.uid());
+      insert into public.ld_profiles values ('${teacher}','teacher'),('${student}','student'),('${other}','student');
+      insert into public.ld_classes values ('${klass}','${teacher}');
+      insert into public.ld_memberships values ('${klass}','${student}');
+      insert into public.ld_sessions values ('${oldSession}','${student}');
+      insert into public.ld_records values ('${student}','학생 기록'),('${other}','다른 학생 기록');
+      insert into storage.objects values ('ld-voice','${student}');`);
+    await db.exec(await readFile(new URL('../db/migrations/003-student-code-ledger.sql',import.meta.url),'utf8'));
+    await db.exec(await readFile(new URL('../db/migrations/004-student-code-session-revocation.sql',import.meta.url),'utf8'));
+    const auth=async(id,sid)=>db.exec(`reset role; select set_config('request.jwt.claim.sub','${id}',false); select set_config('request.jwt.claim.session_id','${sid}',false); set role authenticated;`);
+    await db.exec(`select public.ld_record_student_code('${teacher}','${klass}','${student}','${'a'.repeat(64)}')`);
+    const first=(await db.query('select id from public.ld_student_code_ledger where revoked_at is null')).rows[0].id;
+    assert.equal((await db.query(`select public.ld_register_code_session(${first},'${student}','${oldSession}') as ok`)).rows[0].ok,true);
+    await auth(student,oldSession);
+    assert.equal((await db.query('select * from public.ld_records')).rows.length,1);
+    assert.equal((await db.query('select * from storage.objects')).rows.length,1);
+    assert.equal((await db.query(`select public.ld_owns_session('${oldSession}') as ok`)).rows[0].ok,true);
+    await assert.rejects(db.exec(`select public.ld_register_code_session(${first},'${student}','${newSession}')`));
+    await db.exec('reset role');
+    await db.exec(`select public.ld_record_student_code('${teacher}','${klass}','${student}','${'b'.repeat(64)}')`);
+    const second=(await db.query('select id from public.ld_student_code_ledger where revoked_at is null')).rows[0].id;
+    assert.equal((await db.query(`select public.ld_register_code_session(${first},'${student}','${newSession}') as ok`)).rows[0].ok,false);
+    await auth(student,oldSession);
+    assert.equal((await db.query('select * from public.ld_records')).rows.length,0);
+    assert.equal((await db.query('select * from storage.objects')).rows.length,0);
+    assert.equal((await db.query(`select public.ld_owns_session('${oldSession}') as ok`)).rows[0].ok,false);
+    assert.equal((await db.query(`select public.ld_member_of('${klass}') as ok`)).rows[0].ok,false);
+    await db.exec('reset role');
+    assert.equal((await db.query(`select public.ld_register_code_session(${second},'${student}','${newSession}') as ok`)).rows[0].ok,true);
+    await auth(student,newSession);
+    assert.equal((await db.query('select * from public.ld_records')).rows.length,1);
+    await auth(other,oldSession);
+    assert.equal((await db.query('select * from public.ld_records')).rows.length,1);
+    await assert.rejects(db.exec('select * from public.ld_student_code_sessions'));
+  } finally {await db.close();}
+});
+
