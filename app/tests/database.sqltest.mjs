@@ -7,7 +7,7 @@ test('PostgreSQL 호환 DB에서 스키마와 학급별 RLS를 검증한다',asy
   const db=new PGlite();
   const ids={t1:'11111111-1111-4111-8111-111111111111',t2:'22222222-2222-4222-8222-222222222222',s1:'33333333-3333-4333-8333-333333333333',s2:'44444444-4444-4444-8444-444444444444',c1:'55555555-5555-4555-8555-555555555555',c2:'66666666-6666-4666-8666-666666666666',a1:'77777777-7777-4777-8777-777777777777',a2:'88888888-8888-4888-8888-888888888888',d1:'99999999-9999-4999-8999-999999999999',d2:'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',sub:'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'};
   try{
-    await db.exec(`create role anon; create role authenticated; create schema auth; create schema storage;
+    await db.exec(`create role anon; create role authenticated; create role service_role; create schema auth; create schema storage;
       grant usage on schema auth to authenticated;
       create table auth.users(id uuid primary key);
       create function auth.uid() returns uuid language sql stable as $$select nullif(current_setting('request.jwt.claim.sub',true),'')::uuid$$;
@@ -19,6 +19,7 @@ test('PostgreSQL 호환 DB에서 스키마와 학급별 RLS를 검증한다',asy
       alter table storage.objects enable row level security;
       create table public.literary_works(id bigint primary key);`);
     await db.exec(await readFile(new URL('../db/schema.sql',import.meta.url),'utf8'));
+    await db.exec(await readFile(new URL('../db/migrations/003-student-code-ledger.sql',import.meta.url),'utf8'));
     await db.exec(await readFile(new URL('../db/voice-storage.sql',import.meta.url),'utf8'));
     await db.exec(`insert into auth.users(id) values ('${ids.t1}'),('${ids.t2}'),('${ids.s1}'),('${ids.s2}');
       insert into public.ld_profiles(id,display_name,role) values ('${ids.t1}','교사1','teacher'),('${ids.t2}','교사2','teacher'),('${ids.s1}','학생1','student'),('${ids.s2}','학생2','student');
@@ -34,7 +35,14 @@ test('PostgreSQL 호환 DB에서 스키마와 학급별 RLS를 검증한다',asy
       insert into public.ld_teacher_feedback_drafts(submission_id,author_id,content) values ('${ids.sub}','${ids.t1}','비공개 초안');
       insert into public.ld_turn_exceptions(session_id,teacher_id,reason) values ('${ids.d1}','${ids.t1}','비공개 사유');`);
     const asUser=async id=>{await db.exec(`reset role; select set_config('request.jwt.claim.sub','${id}',false); set role authenticated;`);};
+    const hash1='a'.repeat(64),hash2='b'.repeat(64);
+    await db.exec(`select public.ld_record_student_code('${ids.t1}','${ids.c1}','${ids.s1}','${hash1}')`);
+    await assert.rejects(db.exec(`select public.ld_record_student_code('${ids.t2}','${ids.c1}','${ids.s1}','${hash2}')`));
+    await db.exec(`select public.ld_record_student_code('${ids.t1}','${ids.c1}','${ids.s1}','${hash2}')`);
+    assert.deepEqual((await db.query(`select code_digest,revoked_at is null as active from public.ld_student_code_ledger order by id`)).rows.map(x=>[x.code_digest,x.active]),[[hash1,false],[hash2,true]]);
     await asUser(ids.t1);
+    await assert.rejects(db.exec('select * from public.ld_student_code_ledger'));
+    await assert.rejects(db.exec(`select public.ld_record_student_code('${ids.t1}','${ids.c1}','${ids.s1}','${hash1}')`));
     assert.equal((await db.query(`update public.ld_classes set school='시험학교' where id='${ids.c1}' returning id`)).rows.length,1);
     assert.equal((await db.query(`update public.ld_classes set school='다른학교' where id='${ids.c2}' returning id`)).rows.length,0);
     await assert.rejects(db.exec(`update public.ld_classes set name='변경' where id='${ids.c1}'`));
