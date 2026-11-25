@@ -24,7 +24,7 @@ try{
   const klass=(await adminPost('ld_classes',{teacher_id:teacher.id,name:`가상 코드 학급 ${run}`}))[0];
   await adminPost('ld_memberships',{class_id:klass.id,student_id:student.id});
   await adminPost('ld_student_details',{user_id:student.id,student_name:'가상 코드 학생'});
-  const app=`http://127.0.0.1:${server.address().port}`;
+  const app=process.env.CODE_TEST_PUBLIC_APP==='true'?'https://literary-dialogue-class-test.onrender.com':`http://127.0.0.1:${server.address().port}`;
   const teacherAuth=await must('/auth/v1/token?grant_type=password',{method:'POST',data:{email:teacher.email,password:teacherPassword}});
   const issue=async()=>{const r=await fetch(app+'/api/teacher/student-code',{method:'POST',headers:{'content-type':'application/json',authorization:`Bearer ${teacherAuth.access_token}`},body:JSON.stringify({classId:klass.id,studentId:student.id})});assert.equal(r.status,200,'교사 코드 발급');return (await r.json()).code;};
   const code1=await issue();
