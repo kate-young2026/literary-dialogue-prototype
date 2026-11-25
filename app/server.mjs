@@ -6,7 +6,7 @@ import { countCharacters, countTurns, validSummary } from './lib/rules.mjs';
 import { evaluationEvidence, clippedText } from './lib/evidence.mjs';
 import { hostingSettings, allowsOrigin } from './lib/hosting.mjs';
 import { createAiLimiter } from './lib/ai-limiter.mjs';
-import { codeDigest } from './lib/student-code.mjs';
+import { codeDigest, createStudentCode } from './lib/student-code.mjs';
 
 const root = path.dirname(fileURLToPath(import.meta.url));
 const hosting = hostingSettings();
@@ -20,7 +20,8 @@ const openaiKey = process.env.OPENAI_API_KEY || '';
 const model = process.env.OPENAI_MODEL || '';
 const allowAiRequest = createAiLimiter();
 // Per-process guard only; public hosting must additionally enforce shared rate limits.
-const allowCodeLogin = createAiLimiter({limit:12,windowMs:60_000});
+const allowCodeLogin = createAiLimiter({limit:60,windowMs:60_000});
+const issuingCodes=new Set();
 const voiceEnabled = process.env.VOICE_STORAGE_APPROVED === 'true' && !!process.env.VOICE_RETENTION_NOTICE?.trim();
 const mime = {'.html':'text/html; charset=utf-8','.css':'text/css; charset=utf-8','.js':'text/javascript; charset=utf-8','.mjs':'text/javascript; charset=utf-8'};
 const json = (res, status, data) => { res.writeHead(status, {'content-type':'application/json; charset=utf-8','cache-control':'no-store','x-content-type-options':'nosniff'}); res.end(JSON.stringify(data)); };
@@ -64,6 +65,29 @@ export async function studentCodeLogin(req,res) {
   if(!registered.ok||await registered.json()!==true)return json(res,409,{error:'코드가 변경되었거나 세션 등록에 실패했습니다. 다시 로그인해 주세요.'});
   return json(res,200,{access_token:session.access_token,user:{id:entry.student_id}});
 }
+export async function issueStudentCode(req,res) {
+  if(!sb||!anon||!secret)return json(res,503,{error:'코드 발급 설정이 필요합니다.'});
+  const token=(req.headers.authorization||'').replace(/^Bearer /i,'');
+  let user;try{user=await supa('/auth/v1/user',token);}catch{return json(res,401,{error:'교사 로그인이 필요합니다.'});}
+  const data=await body(req), uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  if(!data||!uuid.test(data.classId||'')||!uuid.test(data.studentId||''))return json(res,400,{error:'학급과 학생을 선택해 주세요.'});
+  const profile=await supa(`/rest/v1/ld_profiles?id=eq.${encodeURIComponent(user.id)}&role=eq.teacher&select=id`,token);
+  const klass=await supa(`/rest/v1/ld_classes?id=eq.${encodeURIComponent(data.classId)}&teacher_id=eq.${encodeURIComponent(user.id)}&select=id`,token);
+  if(!profile.length||!klass.length)return json(res,403,{error:'담당 학급 교사만 코드를 발급할 수 있습니다.'});
+  const members=await supa(`/rest/v1/ld_memberships?class_id=eq.${encodeURIComponent(data.classId)}&student_id=eq.${encodeURIComponent(data.studentId)}&select=student_id`,token);
+  if(members.length!==1)return json(res,403,{error:'담당 학급의 학생을 확인할 수 없습니다.'});
+  const lock=data.studentId;
+  if(issuingCodes.has(lock))return json(res,409,{error:'이미 코드를 발급 중입니다. 잠시 후 다시 시도해 주세요.'});
+  issuingCodes.add(lock);
+  try {
+    const code=createStudentCode();
+    const password=await fetch(`${sb}/auth/v1/admin/users/${encodeURIComponent(data.studentId)}`,{method:'PUT',headers:{...privilegedHeaders(),'content-type':'application/json'},body:JSON.stringify({password:code})});
+    if(!password.ok)return json(res,502,{error:'학생 계정에 코드를 설정하지 못했습니다.'});
+    const recorded=await fetch(`${sb}/rest/v1/rpc/ld_record_student_code`,{method:'POST',headers:{...privilegedHeaders(),'content-type':'application/json'},body:JSON.stringify({p_teacher:user.id,p_class:data.classId,p_student:data.studentId,p_digest:codeDigest(code).toString('hex')})});
+    if(!recorded.ok)return json(res,502,{error:'코드 기록을 저장하지 못했습니다. 학생에게 전달하지 말고 다시 발급해 주세요.'});
+    return json(res,200,{code,classId:data.classId});
+  } finally {issuingCodes.delete(lock);}
+}
 async function works(req,res) {
   if(!sb||!anon||!secret)return json(res,503,{error:'작품 저장소 연결 설정이 필요합니다.'});
   const token=(req.headers.authorization||'').replace(/^Bearer /i,'');let user;
@@ -73,6 +97,21 @@ async function works(req,res) {
   const response=await fetch(`${sb}/rest/v1/literary_works?select=id,title,author,publication_year,category,period,genre,form,content&limit=100`,{headers:privilegedHeaders()});
   if(!response.ok)return json(res,502,{error:'작품을 불러오지 못했습니다.'});
   return json(res,200,await response.json());
+}
+export async function teacherWorks(req,res,url) {
+  if(!sb||!anon||!secret)return json(res,503,{error:'작품 저장소 연결 설정이 필요합니다.'});
+  const token=(req.headers.authorization||'').replace(/^Bearer /i,'');
+  let user;
+  try { user=await supa('/auth/v1/user',token); } catch { return json(res,401,{error:'로그인이 필요합니다.'}); }
+  const profile=await supa(`/rest/v1/ld_profiles?id=eq.${encodeURIComponent(user.id)}&role=eq.teacher&select=id`,token);
+  if(!profile.length)return json(res,403,{error:'교사 계정만 작품 목록을 볼 수 있습니다.'});
+  const raw=url.searchParams.get('page')||'1';
+  if(!/^[1-9]\d{0,5}$/.test(raw))return json(res,400,{error:'페이지 번호가 올바르지 않습니다.'});
+  const page=Number(raw), size=25, offset=(page-1)*size;
+  const response=await fetch(`${sb}/rest/v1/literary_works?select=id,title,author,publication_year,category,period,genre,form&order=id.asc&limit=${size}&offset=${offset}`,{headers:{...privilegedHeaders(),prefer:'count=exact'}});
+  if(!response.ok)return json(res,502,{error:'작품 목록을 불러오지 못했습니다.'});
+  const count=response.headers.get('content-range')?.split('/')[1];
+  return json(res,200,{items:await response.json(),page,pageSize:size,total:count&&/^\d+$/.test(count)?Number(count):null});
 }
 export async function chat(req, res) {
   if (!sb || !anon || !secret || !openaiKey || !model) return json(res, 503, {error:'교사가 서비스 연결 설정을 완료해야 대화할 수 있습니다.'});
@@ -228,11 +267,13 @@ export const server = http.createServer(async (req, res) => {
   try {
     const url = new URL(req.url, `http://localhost:${port}`);
     if (req.method === 'GET' && url.pathname === '/api/config') return json(res, 200, {supabaseUrl:sb,publishableKey:anon,voiceEnabled,voiceNotice:voiceEnabled?process.env.VOICE_RETENTION_NOTICE:''});
+    if (req.method === 'GET' && url.pathname === '/api/teacher/works') return await teacherWorks(req,res,url);
     if (req.method === 'GET' && url.pathname === '/api/works') return await works(req,res);
-    if (req.method === 'POST' && ['/api/chat','/api/submission','/api/transcribe','/api/draft','/api/student/code-login'].includes(url.pathname)) {
+    if (req.method === 'POST' && ['/api/chat','/api/submission','/api/transcribe','/api/draft','/api/student/code-login','/api/teacher/student-code'].includes(url.pathname)) {
       const origin = req.headers.origin;
       if (!allowsOrigin(origin, hosting)) return json(res,403,{error:'요청 출처를 확인할 수 없습니다.'});
       if(url.pathname==='/api/student/code-login')return await studentCodeLogin(req,res);
+      if(url.pathname==='/api/teacher/student-code')return await issueStudentCode(req,res);
       if(url.pathname==='/api/chat')return await chat(req,res);
       if(url.pathname==='/api/submission')return await submit(req,res);
       if(url.pathname==='/api/transcribe')return await transcribe(req,res);
