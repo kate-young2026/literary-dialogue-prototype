@@ -15,6 +15,7 @@ document.getElementById('quiz-form').addEventListener('submit',e=>{e.preventDefa
 const banner='<div class="preview-notice" role="status"><strong>공개 시안</strong> · 화면과 퀴즈를 미리 살펴볼 수 있습니다. AI 대화·계정 접속·녹음·학생 데이터 저장은 아직 연결되지 않았습니다.</div>';
 let output=html.replace('<link rel="stylesheet" href="/style.css"><script type="module" src="/app.js"></script>',`<style>${css}\n.preview-notice{background:#fff0d5;color:#593c0a;padding:14px 5vw;font-size:.95rem}</style>`)
   .replace('<a class="brand" href="/">','<a class="brand" href="./">')
+  .replace('<nav><a href="#rubric-information">','<nav><a href="https://github.com/kate-young2026/literary-dialogue-prototype/blob/main/CHECKLIST.md">수정 내역</a> <a href="#rubric-information">')
   .replace('<div id="student-settings" hidden>','<div id="student-settings">')
   .replace('</header>','</header>'+banner).replace('</body>',previewScript+'</body>');
 if(output.includes('src="/app.js"')||!output.includes('공개 시안'))throw Error('시안 생성에 실패했습니다.');
