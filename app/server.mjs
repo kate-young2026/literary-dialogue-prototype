@@ -6,6 +6,7 @@ import { countCharacters, countTurns, validSummary } from './lib/rules.mjs';
 import { evaluationEvidence, clippedText } from './lib/evidence.mjs';
 import { hostingSettings, allowsOrigin } from './lib/hosting.mjs';
 import { createAiLimiter } from './lib/ai-limiter.mjs';
+import { codeDigest } from './lib/student-code.mjs';
 
 const root = path.dirname(fileURLToPath(import.meta.url));
 const hosting = hostingSettings();
@@ -18,6 +19,8 @@ const privilegedHeaders = () => ({apikey:secret,...(secret.startsWith('sb_secret
 const openaiKey = process.env.OPENAI_API_KEY || '';
 const model = process.env.OPENAI_MODEL || '';
 const allowAiRequest = createAiLimiter();
+// Per-process guard only; public hosting must additionally enforce shared rate limits.
+const allowCodeLogin = createAiLimiter({limit:12,windowMs:60_000});
 const voiceEnabled = process.env.VOICE_STORAGE_APPROVED === 'true' && !!process.env.VOICE_RETENTION_NOTICE?.trim();
 const mime = {'.html':'text/html; charset=utf-8','.css':'text/css; charset=utf-8','.js':'text/javascript; charset=utf-8','.mjs':'text/javascript; charset=utf-8'};
 const json = (res, status, data) => { res.writeHead(status, {'content-type':'application/json; charset=utf-8','cache-control':'no-store','x-content-type-options':'nosniff'}); res.end(JSON.stringify(data)); };
@@ -30,6 +33,36 @@ async function supa(route, token, options = {}) {
   const response = await fetch(`${sb}${route}`, {...options, headers: {'apikey':anon, 'authorization':`Bearer ${token}`, ...options.headers}});
   if (!response.ok) throw new Error(`저장소 요청 실패 (${response.status})`);
   return response.status === 204 ? null : response.json();
+}
+export async function studentCodeLogin(req,res) {
+  if(!sb||!anon||!secret)return json(res,503,{error:'학생 로그인 설정이 필요합니다.'});
+  if(!allowCodeLogin(req.socket?.remoteAddress||'unknown'))return json(res,429,{error:'로그인 시도가 많습니다. 잠시 뒤 다시 시도해 주세요.'});
+  const data=await body(req);
+  if(!data||typeof data!=='object')return json(res,400,{error:'학급과 비밀코드를 확인해 주세요.'});
+  const digest=codeDigest(data.code);
+  if(!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(data.classId||'')||!digest)
+    return json(res,400,{error:'학급과 비밀코드를 확인해 주세요.'});
+  const headers={...privilegedHeaders(),'content-type':'application/json'};
+  const lookup=await fetch(`${sb}/rest/v1/rpc/ld_find_student_code`,{method:'POST',headers,body:JSON.stringify({p_class:data.classId,p_digest:digest.toString('hex')})});
+  if(!lookup.ok)return json(res,503,{error:'학생 로그인 저장소를 사용할 수 없습니다.'});
+  const entries=await lookup.json();
+  if(entries.length!==1)return json(res,401,{error:'학급 또는 비밀코드를 확인해 주세요.'});
+  const entry=entries[0];
+  const account=await fetch(`${sb}/auth/v1/admin/users/${encodeURIComponent(entry.student_id)}`,{headers:privilegedHeaders()});
+  if(!account.ok)return json(res,503,{error:'학생 계정을 확인하지 못했습니다.'});
+  const user=await account.json();
+  if(user.id!==entry.student_id||!user.email)return json(res,503,{error:'학생 계정을 확인하지 못했습니다.'});
+  const login=await fetch(`${sb}/auth/v1/token?grant_type=password`,{method:'POST',headers:{apikey:anon,'content-type':'application/json'},body:JSON.stringify({email:user.email,password:data.code})});
+  if(!login.ok)return json(res,401,{error:'학급 또는 비밀코드를 확인해 주세요.'});
+  const session=await login.json();
+  let claims;
+  try {claims=JSON.parse(Buffer.from(session.access_token.split('.')[1],'base64url').toString('utf8'));}catch{return json(res,502,{error:'로그인 세션을 확인하지 못했습니다.'});}
+  if(session.user?.id!==entry.student_id||claims.sub!==entry.student_id||!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(claims.session_id||''))
+    return json(res,502,{error:'로그인 세션을 확인하지 못했습니다.'});
+  // Registration locks the active credential row; a concurrent reissue fails closed.
+  const registered=await fetch(`${sb}/rest/v1/rpc/ld_register_code_session`,{method:'POST',headers,body:JSON.stringify({p_credential:entry.credential_id,p_student:entry.student_id,p_session:claims.session_id})});
+  if(!registered.ok||await registered.json()!==true)return json(res,409,{error:'코드가 변경되었거나 세션 등록에 실패했습니다. 다시 로그인해 주세요.'});
+  return json(res,200,{access_token:session.access_token,user:{id:entry.student_id}});
 }
 async function works(req,res) {
   if(!sb||!anon||!secret)return json(res,503,{error:'작품 저장소 연결 설정이 필요합니다.'});
@@ -196,9 +229,10 @@ export const server = http.createServer(async (req, res) => {
     const url = new URL(req.url, `http://localhost:${port}`);
     if (req.method === 'GET' && url.pathname === '/api/config') return json(res, 200, {supabaseUrl:sb,publishableKey:anon,voiceEnabled,voiceNotice:voiceEnabled?process.env.VOICE_RETENTION_NOTICE:''});
     if (req.method === 'GET' && url.pathname === '/api/works') return await works(req,res);
-    if (req.method === 'POST' && ['/api/chat','/api/submission','/api/transcribe','/api/draft'].includes(url.pathname)) {
+    if (req.method === 'POST' && ['/api/chat','/api/submission','/api/transcribe','/api/draft','/api/student/code-login'].includes(url.pathname)) {
       const origin = req.headers.origin;
       if (!allowsOrigin(origin, hosting)) return json(res,403,{error:'요청 출처를 확인할 수 없습니다.'});
+      if(url.pathname==='/api/student/code-login')return await studentCodeLogin(req,res);
       if(url.pathname==='/api/chat')return await chat(req,res);
       if(url.pathname==='/api/submission')return await submit(req,res);
       if(url.pathname==='/api/transcribe')return await transcribe(req,res);
