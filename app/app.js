@@ -29,7 +29,8 @@ $('standard-reference').innerHTML=standards.map(s=>`<p>${escape(s.subject)} · $
 async function request(path, options={}) {
   const response = await fetch(`${config.supabaseUrl}${path}`, {...options, headers:{apikey:config.publishableKey,...(auth?.access_token?{authorization:`Bearer ${auth.access_token}`} : {}),'content-type':'application/json',...options.headers}});
   if (!response.ok) { const result=await response.json().catch(()=>({})); throw Error(result.message || result.error_description || `요청에 실패했습니다 (${response.status}).`); }
-  return response.status===204 ? null : response.json();
+  const text=await response.text();
+  return text ? JSON.parse(text) : null;
 }
 async function loadMessages() {
   messages = await request(`/rest/v1/ld_messages?session_id=eq.${session.id}&order=turn_index.asc,created_at.asc&select=*`);
