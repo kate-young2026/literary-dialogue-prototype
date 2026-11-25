@@ -32,9 +32,11 @@ test('재발급은 이전 코드에 연결된 세션의 DB 접근을 차단한�
       insert into storage.objects values ('ld-voice','${student}');`);
     await db.exec(await readFile(new URL('../db/migrations/003-student-code-ledger.sql',import.meta.url),'utf8'));
     await db.exec(await readFile(new URL('../db/migrations/004-student-code-session-revocation.sql',import.meta.url),'utf8'));
+    await db.exec(await readFile(new URL('../db/migrations/005-student-code-lookup.sql',import.meta.url),'utf8'));
     const auth=async(id,sid)=>db.exec(`reset role; select set_config('request.jwt.claim.sub','${id}',false); select set_config('request.jwt.claim.session_id','${sid}',false); set role authenticated;`);
     await db.exec(`select public.ld_record_student_code('${teacher}','${klass}','${student}','${'a'.repeat(64)}')`);
     const first=(await db.query('select id from public.ld_student_code_ledger where revoked_at is null')).rows[0].id;
+    assert.equal((await db.query(`select * from public.ld_find_student_code('${klass}','${'a'.repeat(64)}')`)).rows.length,1);
     assert.equal((await db.query(`select public.ld_register_code_session(${first},'${student}','${oldSession}') as ok`)).rows[0].ok,true);
     await auth(student,oldSession);
     assert.equal((await db.query('select * from public.ld_records')).rows.length,1);
@@ -44,6 +46,7 @@ test('재발급은 이전 코드에 연결된 세션의 DB 접근을 차단한�
     await db.exec('reset role');
     await db.exec(`select public.ld_record_student_code('${teacher}','${klass}','${student}','${'b'.repeat(64)}')`);
     const second=(await db.query('select id from public.ld_student_code_ledger where revoked_at is null')).rows[0].id;
+    assert.equal((await db.query(`select * from public.ld_find_student_code('${klass}','${'a'.repeat(64)}')`)).rows.length,0);
     assert.equal((await db.query(`select public.ld_register_code_session(${first},'${student}','${newSession}') as ok`)).rows[0].ok,false);
     await auth(student,oldSession);
     assert.equal((await db.query('select * from public.ld_records')).rows.length,0);
@@ -57,6 +60,7 @@ test('재발급은 이전 코드에 연결된 세션의 DB 접근을 차단한�
     await auth(other,oldSession);
     assert.equal((await db.query('select * from public.ld_records')).rows.length,1);
     await assert.rejects(db.exec('select * from public.ld_student_code_sessions'));
+    await assert.rejects(db.exec(`select * from public.ld_find_student_code('${klass}','${'b'.repeat(64)}')`));
   } finally {await db.close();}
 });
 
