@@ -9,4 +9,3 @@ $$;
 revoke all on function public.ld_find_student_code(uuid,text) from public,anon,authenticated;
 grant execute on function public.ld_find_student_code(uuid,text) to service_role;
 commit;
-

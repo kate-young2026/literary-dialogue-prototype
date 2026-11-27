@@ -38,4 +38,3 @@ end $$;
 revoke all on function public.ld_record_student_code(uuid,uuid,uuid,text) from public,anon,authenticated;
 grant execute on function public.ld_record_student_code(uuid,uuid,uuid,text) to service_role;
 commit;
-

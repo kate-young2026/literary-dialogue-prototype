@@ -13,4 +13,3 @@ test('사용자 수 한도를 넘으면 기존 제한을 유지하고 만료 후
   assert.equal(allow('a'),true);assert.equal(allow('b'),false);assert.equal(allow('a'),false);
   clock=1000;assert.equal(allow('b'),true);
 });
-

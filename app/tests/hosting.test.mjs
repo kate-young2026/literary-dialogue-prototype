@@ -23,4 +23,3 @@ test('잘못된 포트와 바인딩 주소는 실행하지 않는다', () => {
   for (const port of ['0','65536','not-a-port']) assert.throws(() => hostingSettings({PORT:port}));
   assert.throws(() => hostingSettings({HOST:'::'}));
 });
-

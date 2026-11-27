@@ -63,4 +63,3 @@ test('재발급은 이전 코드에 연결된 세션의 DB 접근을 차단한�
     await assert.rejects(db.exec(`select * from public.ld_find_student_code('${klass}','${'b'.repeat(64)}')`));
   } finally {await db.close();}
 });
-

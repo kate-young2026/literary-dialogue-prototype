@@ -12,4 +12,3 @@ export function verifyStudentCode(code, storedDigest) {
   const digest = codeDigest(code);
   return !!digest && Buffer.isBuffer(storedDigest) && storedDigest.length === digest.length && timingSafeEqual(digest, storedDigest);
 }
-

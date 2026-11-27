@@ -73,4 +73,3 @@ create policy ld_voice_code_session_gate on storage.objects as restrictive for a
   using (bucket_id <> 'ld-voice' or public.ld_code_session_valid())
   with check (bucket_id <> 'ld-voice' or public.ld_code_session_valid());
 commit;
-

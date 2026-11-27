@@ -41,4 +41,3 @@ try{
   assert.equal((await read(second.value.access_token)).value.length,1,'새 세션 접근');
   console.log('성공: 실제 Supabase 코드 로그인, 재발급 후 이전 코드·세션 차단, 새 세션 접근 및 학생의 코드 조회 차단. 가상 계정과 기록은 시험 프로젝트에 남습니다.');
 }finally{await new Promise(resolve=>server.close(resolve));}
-

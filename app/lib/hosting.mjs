@@ -20,4 +20,3 @@ export function hostingSettings(env = process.env) {
 export function allowsOrigin(origin, settings) {
   return !origin || settings.allowedOrigins.includes(origin);
 }
-

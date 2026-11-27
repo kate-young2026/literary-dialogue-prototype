@@ -33,7 +33,7 @@ test('세 학생 유형의 대화, 제출 및 교사 초안 흐름을 모의 저
         if(u.pathname.endsWith('/ld_profiles'))return ok(who===teacherId?[{id:teacherId}]:[]);
         if(u.pathname.endsWith('/ld_classes'))return ok(who===teacherId?[{id:classId}]:[]);
         if(u.pathname.endsWith('/ld_sessions'))return ok([{id:sessionId,student_id:studentId,character:'지민',assignment_id:assignmentId}]);
-        if(u.pathname.endsWith('/ld_assignments'))return ok([{id:assignmentId,class_id:classId,title:'관내분실',prompt:'다른 선택은?',material:{summary:'작품 소개'},rubric:[]}]);
+        if(u.pathname.endsWith('/ld_assignments'))return ok([{id:assignmentId,class_id:classId,title:'관내분실',prompt:'다른 선택은?',material:{summary:'작품 소개'},rubric:[{text:'확정된 기준'}],rubric_confirmed:true}]);
         if(u.pathname.endsWith('/ld_messages')){
           if(options.method==='POST'){messages.push(JSON.parse(options.body));return noContent();}
           return ok(messages);
@@ -185,4 +185,3 @@ test('조합 한글과 이모지를 포함한 요약의 서버 글자 수를 저
     assert.equal(writes.length,2);
   }finally{globalThis.fetch=originalFetch;}
 });
-

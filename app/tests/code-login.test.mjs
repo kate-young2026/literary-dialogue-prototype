@@ -27,4 +27,3 @@ test('코드 로그인은 활성 코드와 일치하는 Auth 세션을 등록한
     r=await call({classId:'invalid',code});assert.equal(r.status,400);
   } finally {globalThis.fetch=original;}
 });
-
